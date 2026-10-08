@@ -375,7 +375,7 @@
                 "title": "收集箱文档 ID"
             },
             "inboxDownloadAssets": {
-                "description": "把消息中的图片、语音、视频和文件解密后保存到工作空间，当前思源版本不支持解密时仍显示为占位文本",
+                "description": "把消息中的图片、语音、视频和文件解密后保存到工作空间",
                 "title": "下载资源文件"
             },
             "inboxEnabled": {

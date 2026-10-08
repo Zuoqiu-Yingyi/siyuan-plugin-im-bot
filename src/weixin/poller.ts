@@ -53,7 +53,7 @@ function sameLogin(a: IWeixinAccount, b: IWeixinAccount): boolean {
  * 以长轮询 (getupdates) 接收微信消息, 游标保存在 `weixin/<机器人 ID>/cursor.json` 中, 重新启动后从上次的位置继续, 重新登录后从头开始。
  * 重试规则与官方客户端的 monitor.ts 相同: 失败后 2 秒重试, 连续失败 3 次后等待 30 秒;
  * 返回 -14 (登录失效) 时停止轮询并调用 onExpired, 需要重新扫码 (官方客户端会暂停 1 小时后重试)。
- * 进行中的长轮询请求无法取消: 停止后它返回的消息被丢弃, 游标也不会前进, 下次轮询时会再次收到这些消息。
+ * 停止时取消进行中的长轮询请求: 游标没有前进, 下次轮询时会再次收到这次请求将要返回的消息。
  * Receives WeChat messages by long polling getupdates, and keeps the cursor in
  * `weixin/<bot ID>/cursor.json` to resume after a restart.
  */
@@ -65,6 +65,7 @@ export class WeixinPoller {
 
     private generation = 0; // 轮询序号, 开始或停止时递增, 旧的轮询据此退出
     private account?: IWeixinAccount; // 正在轮询的登录信息
+    private controller?: AbortController; // 取消这次轮询中进行的请求
 
     /**
      * @param siyuan - 内核插件全局对象
@@ -97,7 +98,8 @@ export class WeixinPoller {
         void this.stop();
         const generation = ++this.generation;
         this.account = account;
-        void this.run(generation, account);
+        this.controller = new AbortController();
+        void this.run(generation, account, this.controller.signal);
     }
 
     /* 停止轮询, 并通知服务端 */
@@ -108,6 +110,8 @@ export class WeixinPoller {
         }
         this.generation++;
         this.account = undefined;
+        this.controller?.abort();
+        this.controller = undefined;
         void this.siyuan.logger.info(`[weixin] stop receiving the messages of bot ${account.botId}`);
         await this.notify(account, "stop");
     }
@@ -123,7 +127,7 @@ export class WeixinPoller {
         }
     }
 
-    private async run(generation: number, account: IWeixinAccount): Promise<void> {
+    private async run(generation: number, account: IWeixinAccount, signal: AbortSignal): Promise<void> {
         void this.siyuan.logger.info(`[weixin] start receiving the messages of bot ${account.botId}`);
         await this.notify(account, "start");
         let cursor = await this.loadCursor(account);
@@ -131,7 +135,7 @@ export class WeixinPoller {
         while (generation === this.generation) {
             let response: IGetUpdatesResponse;
             try {
-                response = await this.api.getUpdates(account, cursor);
+                response = await this.api.getUpdates(account, cursor, signal);
             }
             catch (error) {
                 if (generation !== this.generation) {

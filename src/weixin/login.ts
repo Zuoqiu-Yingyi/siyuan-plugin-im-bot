@@ -67,7 +67,7 @@ function resolveBaseUrl(baseurl: string | undefined): string {
  * 微信扫码登录: 获取二维码, 在后台长轮询扫码状态, 确认后交给 onConfirmed 保存登录信息。
  * 流程与官方客户端的 auth/login-qr.ts 相同: 处理验证码与换机房 (scaned_but_redirect);
  * 二维码过期或验证码被锁定时获取新的二维码, 一次登录最多 3 个二维码, 最长 480 秒。
- * 同一时间只有一个登录, 开始新的登录或取消时, 旧登录的轮询在当前请求返回后退出。
+ * 同一时间只有一个登录, 开始新的登录或结束登录时取消旧登录进行中的查询, 旧登录的轮询随之退出。
  * WeChat QR code login: fetches a QR code, long-polls its status in the
  * background and hands the confirmed login to onConfirmed.
  */
@@ -77,6 +77,7 @@ export class WeixinLogin {
     private readonly onConfirmed: (login: IConfirmedLogin) => Promise<IWeixinAccountState>;
 
     private session = 0; // 登录序号, 开始或结束登录时递增, 旧登录的轮询据此退出
+    private controller?: AbortController; // 取消当前登录进行中的扫码状态查询
     private state: IWeixinLoginState = { status: "idle" };
     private qrcode = ""; // 当前二维码的 ID
     private codes = 0; // 本次登录已获取的二维码数
@@ -105,6 +106,9 @@ export class WeixinLogin {
      */
     public async start(): Promise<IWeixinLoginState> {
         const session = ++this.session;
+        this.controller?.abort();
+        const controller = new AbortController();
+        this.controller = controller;
         this.codes = 0;
         this.verifyCode = undefined;
         this.state = { status: "wait" };
@@ -118,7 +122,7 @@ export class WeixinLogin {
             return this.current();
         }
         if (session === this.session) {
-            void this.poll(session);
+            void this.poll(session, controller.signal);
         }
         return this.current();
     }
@@ -148,9 +152,11 @@ export class WeixinLogin {
         return this.current();
     }
 
-    /* 结束登录, 递增序号使轮询退出 */
+    /* 结束登录, 递增序号并取消进行中的查询, 使轮询退出 */
     private finish(state: IWeixinLoginState): void {
         this.session++;
+        this.controller?.abort();
+        this.controller = undefined;
         this.qrcode = "";
         this.verifyCode = undefined;
         this.state = state;
@@ -183,7 +189,7 @@ export class WeixinLogin {
     }
 
     /* 在后台查询扫码状态, 直到登录结束、超时或被新的登录取代 */
-    private async poll(session: number): Promise<void> {
+    private async poll(session: number, signal: AbortSignal): Promise<void> {
         const deadline = Date.now() + LOGIN_TIMEOUT;
         while (session === this.session) {
             if (Date.now() >= deadline) {
@@ -200,9 +206,12 @@ export class WeixinLogin {
             const code = this.verifyCode;
             let response: IQRCodeStatusResponse;
             try {
-                response = await this.api.getQRCodeStatus(this.baseUrl, this.qrcode, code);
+                response = await this.api.getQRCodeStatus(this.baseUrl, this.qrcode, code, signal);
             }
             catch (error) {
+                if (session !== this.session) {
+                    return;
+                }
                 // 网络错误与网关超时都视为仍在等待, 与官方客户端相同
                 void this.siyuan.logger.debug("[weixin] [login] query the QR code status failed, retry:", errorMessage(error));
                 response = { status: "wait" };

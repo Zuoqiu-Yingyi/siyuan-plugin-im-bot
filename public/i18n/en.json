@@ -375,7 +375,7 @@
                 "title": "Inbox document ID"
             },
             "inboxDownloadAssets": {
-                "description": "Download and decrypt the images, voice messages, videos and files of messages into the workspace; they stay placeholders when this version of SiYuan cannot decrypt them",
+                "description": "Download and decrypt the images, voice messages, videos and files of messages into the workspace",
                 "title": "Download assets"
             },
             "inboxEnabled": {

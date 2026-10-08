@@ -60,8 +60,7 @@ function sameOptions(a: ITelegramOptions, b: ITelegramOptions): boolean {
  * 开始后先以 timeout 0 请求一次, 立即确认能否接收, 之后才是长轮询。
  * 失败后 2 秒重试, 连续失败 3 次后等待 30 秒; 超过频率限制时按 retry_after 等待;
  * Token 无效 (401、404) 与冲突 (409: 设置了 Webhook, 或者其他程序也在接收) 时停止, 修改设置后再次开始。
- * 进行中的长轮询请求无法取消: 停止后它返回的更新被丢弃, 也没有被确认, 下次开始时会再次收到;
- * 新的 getUpdates 请求会让服务端以 409 结束旧的请求, 旧请求的结果已被丢弃, 不受影响。
+ * 停止时取消进行中的长轮询请求: 它将要返回的更新没有被确认, 下次开始时会再次收到。
  * Receives Telegram updates by long polling getUpdates and keeps the
  * connection state for the settings panel. The offset is kept in memory only,
  * because the server remembers the confirmed updates.
@@ -73,6 +72,7 @@ export class TelegramPoller {
     private readonly onReady: (bot: ITelegramBot) => void;
 
     private generation = 0; // 轮询序号, 开始或停止时递增, 旧的轮询据此退出
+    private controller?: AbortController; // 取消这次轮询中进行的请求
     private options?: ITelegramOptions; // 正在使用的 Token 与服务器地址; undefined 表示没有运行
     private current: ITelegramConnectionState = { status: "stopped" }; // 连接状态
 
@@ -127,7 +127,8 @@ export class TelegramPoller {
         this.stop();
         const generation = ++this.generation;
         this.options = options;
-        void this.run(generation, options);
+        this.controller = new AbortController();
+        void this.run(generation, options, this.controller.signal);
     }
 
     /* 停止接收 */
@@ -136,11 +137,13 @@ export class TelegramPoller {
             void this.siyuan.logger.info(`[telegram] stop receiving the updates of bot ${botIdOf(this.options.token)}`);
         }
         this.generation++;
+        this.controller?.abort();
+        this.controller = undefined;
         this.options = undefined;
         this.setState("stopped");
     }
 
-    private async run(generation: number, options: ITelegramOptions): Promise<void> {
+    private async run(generation: number, options: ITelegramOptions, signal: AbortSignal): Promise<void> {
         const id = botIdOf(options.token);
         void this.siyuan.logger.info(`[telegram] start receiving the updates of bot ${id}`);
         this.setState("connecting");
@@ -151,7 +154,7 @@ export class TelegramPoller {
         while (generation === this.generation) {
             try {
                 if (!me) {
-                    const result = await this.api.getMe(options);
+                    const result = await this.api.getMe(options, signal);
                     if (generation !== this.generation) {
                         return;
                     }
@@ -161,7 +164,7 @@ export class TelegramPoller {
                 }
 
                 const connected = this.current.status === "connected";
-                const updates = await this.api.getUpdates(options, offset, connected ? POLL_TIMEOUT : 0);
+                const updates = await this.api.getUpdates(options, offset, connected ? POLL_TIMEOUT : 0, signal);
                 if (generation !== this.generation) {
                     return;
                 }

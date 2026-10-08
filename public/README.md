@@ -101,7 +101,7 @@ From then on, the messages of the chat are recorded in dated sub-documents of th
 - What are the limits of the WeChat ClawBot?
 
   - It only chats one-on-one with the WeChat user who scanned the QR code. It cannot join group chats, and nobody else can add it.
-  - Images, voice messages, files and videos are stored encrypted on the WeChat CDN. They are decrypted and saved into the workspace only when the SiYuan kernel provides `siyuan.crypto` with AES-ECB; otherwise they are recorded as placeholder text (voice messages come with the WeChat transcription).
+  - Images, voice messages, files and videos are stored encrypted on the WeChat CDN. The plugin downloads and decrypts them into the workspace; the ones that fail to download or decrypt are recorded as placeholder text (voice messages come with the WeChat transcription).
   - Voice messages are saved in the WeChat SILK format, which SiYuan cannot play, so the transcription stays in the message. Media over 100 MB are not downloaded.
   - "Reply with the block link" replies right after a message arrives. WeChat does not publish the limits of replies; the community has observed at most about 10 replies after each message. When a reply succeeds without a message ID, it may not have been delivered, and the kernel log shows a warning. Messages the bot starts on its own are even less reliable, so the plugin does not send online and offline notices to WeChat.
   - The plugin uses the same API (the iLink Bot API) as the official OpenClaw WeChat plugin. WeChat has not said whether other clients may use it.
@@ -419,7 +419,7 @@ From then on, the messages of the chat are recorded in dated sub-documents of th
       - When on, the bot replies to each message written into the inbox with the block hyperlink of its super block, `siyuan://blocks/<block ID>`. Off by default; see Q & A for the limits
     - `Download assets`
 
-      - When on, decrypts the images, voice messages, videos and files of messages and saves them as assets in the workspace; see "How messages are converted". When the SiYuan kernel cannot decrypt them (no `siyuan.crypto`, or no AES-ECB), they stay placeholders
+      - When on, decrypts the images, voice messages, videos and files of messages and saves them as assets in the workspace; see "How messages are converted". The media that fail to download or decrypt stay placeholders
       - On by default; a change applies to the messages received afterwards
 - `Telegram Bot`
 

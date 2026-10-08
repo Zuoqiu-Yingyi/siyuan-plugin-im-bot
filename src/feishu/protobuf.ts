@@ -15,7 +15,7 @@
 
 /**
  * 飞书长连接的帧: protobuf (proto2) 编码的 pbbp2.Frame, 字段编号取自官方 SDK 生成的代码 (pbbp2.js)。
- * 思源内核的 goja 运行时没有 TextEncoder 与 TextDecoder, 所以 UTF-8 与 varint 都在这里实现;
+ * 只实现了这两个 message 所需的编解码, 字符串用 TextEncoder 与 TextDecoder 按 UTF-8 编解码;
  * uint64 字段 (SeqID、LogID) 用十进制字符串表示: 服务端下发的 LogID 超过 2^53, 用 number 会丢失精度。
  */
 
@@ -53,89 +53,9 @@ const WIRE_VARINT = 0;
 const WIRE_64BIT = 1;
 const WIRE_LENGTH_DELIMITED = 2;
 const WIRE_32BIT = 5;
-const DECODE_CHUNK = 4096; // 解码 UTF-8 时每次转换为字符串的码元数
 
-/* 把字符串编码为 UTF-8, 不成对的代理项编码为 U+FFFD */
-export function utf8Encode(text: string): Uint8Array {
-    const bytes: number[] = [];
-    for (let i = 0; i < text.length; i++) {
-        let code = text.charCodeAt(i);
-        if (code >= 0xD800 && code <= 0xDBFF && i + 1 < text.length) {
-            const next = text.charCodeAt(i + 1);
-            if (next >= 0xDC00 && next <= 0xDFFF) {
-                code = 0x10000 + ((code - 0xD800) << 10) + (next - 0xDC00);
-                i++;
-            }
-        }
-        if (code >= 0xD800 && code <= 0xDFFF) {
-            code = 0xFFFD;
-        }
-        if (code < 0x80) {
-            bytes.push(code);
-        }
-        else if (code < 0x800) {
-            bytes.push(0xC0 | (code >> 6), 0x80 | (code & 0x3F));
-        }
-        else if (code < 0x10000) {
-            bytes.push(0xE0 | (code >> 12), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F));
-        }
-        else {
-            bytes.push(0xF0 | (code >> 18), 0x80 | ((code >> 12) & 0x3F), 0x80 | ((code >> 6) & 0x3F), 0x80 | (code & 0x3F));
-        }
-    }
-    return new Uint8Array(bytes);
-}
-
-/* 是否为 UTF-8 的后续字节 (10xxxxxx) */
-function isContinuation(byte: number | undefined): boolean {
-    return byte !== undefined && (byte & 0xC0) === 0x80;
-}
-
-/* 把 UTF-8 解码为字符串, 无效的字节序列解码为 U+FFFD */
-export function utf8Decode(bytes: Uint8Array): string {
-    let result = "";
-    let units: number[] = [];
-    let i = 0;
-    while (i < bytes.length) {
-        const byte = bytes[i]!;
-        let code = 0xFFFD;
-        let size = 1;
-        if (byte < 0x80) {
-            code = byte;
-        }
-        else if (byte >= 0xC2 && byte < 0xE0 && isContinuation(bytes[i + 1])) {
-            code = ((byte & 0x1F) << 6) | (bytes[i + 1]! & 0x3F);
-            size = 2;
-        }
-        else if (byte >= 0xE0 && byte < 0xF0 && isContinuation(bytes[i + 1]) && isContinuation(bytes[i + 2])) {
-            code = ((byte & 0x0F) << 12) | ((bytes[i + 1]! & 0x3F) << 6) | (bytes[i + 2]! & 0x3F);
-            size = 3;
-            if (code < 0x800 || (code >= 0xD800 && code <= 0xDFFF)) {
-                code = 0xFFFD;
-            }
-        }
-        else if (byte >= 0xF0 && byte < 0xF5 && isContinuation(bytes[i + 1]) && isContinuation(bytes[i + 2]) && isContinuation(bytes[i + 3])) {
-            code = ((byte & 0x07) << 18) | ((bytes[i + 1]! & 0x3F) << 12) | ((bytes[i + 2]! & 0x3F) << 6) | (bytes[i + 3]! & 0x3F);
-            size = 4;
-            if (code < 0x10000 || code > 0x10FFFF) {
-                code = 0xFFFD;
-            }
-        }
-        if (code >= 0x10000) {
-            code -= 0x10000;
-            units.push(0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF));
-        }
-        else {
-            units.push(code);
-        }
-        if (units.length >= DECODE_CHUNK) {
-            result += String.fromCharCode(...units);
-            units = [];
-        }
-        i += size;
-    }
-    return result + String.fromCharCode(...units);
-}
+const encoder = new TextEncoder(); // 不成对的代理项编码为 U+FFFD
+const decoder = new TextDecoder("utf-8", { ignoreBOM: true }); // 无效的字节序列解码为 U+FFFD, 保留字符串开头的 U+FEFF
 
 /* uint64 转为十进制字符串: 按 4 个 16 位的分段做除法 */
 function uint64ToString({ lo, hi }: IUint64): string {
@@ -212,7 +132,7 @@ class Writer {
     }
 
     public string(field: number, value: string): void {
-        this.bytesField(field, utf8Encode(value));
+        this.bytesField(field, encoder.encode(value));
     }
 
     public finish(): Uint8Array {
@@ -269,7 +189,7 @@ class Reader {
     }
 
     public string(): string {
-        return utf8Decode(this.bytes());
+        return decoder.decode(this.bytes());
     }
 
     /* 跳过未知的字段 */

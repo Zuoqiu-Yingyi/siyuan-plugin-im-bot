@@ -131,7 +131,7 @@ function waitAtMost(promise: Promise<unknown>, ms: number): Promise<void> {
  * 关闭上线开关时不连接网关; 指定了运行设备时, 只有该设备连接网关、发送通知并同步指令面板。
  * 微信 ClawBot 扫码登录后 (RPC weixin-login-*), 打开上线开关时在扫码登录的设备上以长轮询接收消息并写入收集箱,
  * 登录信息保存在 `weixin/<机器人 ID>/auth.json` 中, 当前的机器人 ID 写入配置文件的 weixin.botId;
- * 内核的 siyuan.crypto 支持 AES-ECB 时, 消息中的媒体解密后保存为资源文件, 否则显示为占位文本。
+ * 消息中的媒体用内核 crypto.subtle 的 AES-ECB 解密后保存为资源文件。
  * Telegram 机器人填写 Token 并打开上线开关后, 以长轮询 (getUpdates) 接收更新: 把绑定会话的消息写入收集箱,
  * 响应 /chatid 与 /start, 上线与下线时向开启了通知的绑定会话发送通知; 指定了运行设备时只有该设备接收,
  * 并在 getMe 成功后把机器人 ID 写入配置文件的 telegram.botId。
@@ -157,9 +157,8 @@ function waitAtMost(promise: Promise<unknown>, ms: number): Promise<void> {
  * this device. After a WeChat ClawBot QR code login (weixin-login-* RPC
  * methods) and with its online switch on, the device that logged in long-polls
  * its messages into the inbox; the login is kept in `weixin/<bot ID>/auth.json`
- * and the bot ID in weixin.botId of the config. When
- * siyuan.crypto of the kernel supports AES-ECB, the media of the messages are
- * decrypted and saved as assets, otherwise they are written as placeholders.
+ * and the bot ID in weixin.botId of the config. The media of the messages are
+ * decrypted with the AES-ECB of the kernel's crypto.subtle and saved as assets.
  * With a Telegram bot token and its online switch on, it long-polls the
  * updates of the bot: the messages of bound chats go into the inbox, /chatid
  * and /start are answered, and the bound chats that turn on notices are told

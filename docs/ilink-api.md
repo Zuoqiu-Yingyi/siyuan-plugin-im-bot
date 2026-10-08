@@ -551,17 +551,18 @@ token 裸调同样被服务端拒绝）。`openclaw-weixin` issue #202（2026-06
 ### 1. 长轮询与内核 fetch 超时
 
 `getupdates` 的服务端 hold 时间约 35 秒，小于思源内核 `siyuan.client.fetch`
-固定的 1 分钟超时，可以直接走现有的 `/api/network/proxy` 转发（参考
-`src/utils/proxy.ts` 的 `proxyFetch`），不需要额外处理。和 QQ 侧的 WebSocket 网关
+默认的 1 分钟超时，可以直接走现有的 `/api/network/proxy` 转发（参考
+`src/utils/proxy.ts` 的 `proxyFetch`），不需要额外处理。思源 3.8.7-alpha.6 起 `fetch` 接受
+`signal`，im-bot 停止轮询时用 `AbortController` 取消进行中的长轮询。和 QQ 侧的 WebSocket 网关
 （`src/qq/gateway.ts`，经 `/ws/network/proxy`）相比，iLink 不需要维护连接状态
 机、心跳、重连退避，实现上更简单。
 
-### 2. goja 运行时没有 crypto 模块
+### 2. 内核插件的 crypto
 
-思源内核的 goja 沙箱只启用了 `url`、`buffer`、`console` 三个扩展模块
+调研时（2026-10-01）思源内核的 goja 沙箱只启用了 `url`、`buffer`、`console` 三个扩展模块
 （`kernel/plugin/sandbox.go` 的 `EnableExtendModules`），**没有 `crypto` 或
 `node:crypto`**。而 iLink 的媒体收发强制要求 AES-128-ECB 加解密与 MD5 校验，
-这意味着：
+当时这意味着：
 
 - 需要引入或手写纯 JS 实现的 AES-128-ECB（例如移植 `aes-js` 之类的无依赖实现，
   打包进 `kernel.ts` 的产物）和 MD5。
@@ -569,8 +570,9 @@ token 裸调同样被服务端拒绝）。`openclaw-weixin` issue #202（2026-06
   （非 CSPRNG，对这个场景风险可接受，但要在代码注释里写清楚原因）。
 - 文本收发（不涉及媒体）完全不受此限制，可以先只实现文本通道。
 
-思源 PR [#20042](https://github.com/siyuan-note/siyuan/pull/20042)（2026-10 尚未合并）为内核插件提供了
-`siyuan.crypto`（Web Crypto 接口），并在 Web Crypto 之外提供了 `AES-ECB` 与 `MD5` 两个扩展算法。
+思源 PR [#20042](https://github.com/siyuan-note/siyuan/pull/20042) 为内核插件提供了 Web Crypto 接口，
+并在 Web Crypto 之外提供了 `AES-ECB` 与 `MD5` 两个扩展算法：3.8.7-alpha.3 至 alpha.5 挂在 `siyuan.crypto`，
+3.8.7-alpha.6 起只有标准的 `globalThis.crypto`。
 2026-10-02 用该分支构建的 3.8.7-alpha.2 内核实测：
 
 - `importKey("raw", key, { name: "AES-ECB" }, false, ["decrypt"])` 与 `decrypt({ name: "AES-ECB" }, key, data)`
@@ -584,8 +586,8 @@ token 裸调同样被服务端拒绝）。`openclaw-weixin` issue #202（2026-06
 
 im-bot 的实现（`src/weixin/media.ts`）：
 
-- 收到媒体消息后先以占位文本写入，回复之后再下载。第一次处理媒体时检查内核：没有 `siyuan.crypto`，
-  或者用全零密钥导入 `AES-ECB` 失败，就只在日志中记一条，之后的媒体都保留占位文本。
+- 收到媒体消息后先以占位文本写入，回复之后再下载。插件的 `minAppVersion` 是 3.8.7-alpha.6，
+  直接使用 `crypto.subtle` 的 `AES-ECB` 与 `MD5`，不再检查内核是否支持。
 - 下载经 `/api/network/proxy`（`proxyFetchBinary`），解密后用 `/api/asset/upload` 上传为资源文件，再用
   `/api/block/updateBlock` 替换消息超级块：块 ID 与块属性不变，指向它的块引用仍然有效，子块会换成新的块。
 - 文件与视频带 `md5`、`video_md5` 时用 MD5 校验明文，不一致只记录警告：还没有真实的文件与视频消息
@@ -596,9 +598,9 @@ im-bot 的实现（`src/weixin/media.ts`）：
 
 `src/utils/proxy.ts` 的 `proxyFetch` 以文本读取目标的响应（通过
 `Content-Type: application/octet-stream` 判断是否为目标的真实响应），媒体下载改用以
-`arrayBuffer()` 读取的 `proxyFetchBinary`。上传资源文件时，`siyuan.client.fetch` 的请求体只能是字符串
-或 `ArrayBuffer`，所以 `src/utils/asset.ts` 手动拼接 multipart/form-data。媒体上传到微信 CDN
-（发送媒体消息）还没有实现，届时请求体也要用 `ArrayBuffer`。
+`arrayBuffer()` 读取的 `proxyFetchBinary`。思源 3.8.7-alpha.6 起 `siyuan.client.fetch` 的请求体可以是
+`FormData`，`src/utils/asset.ts` 用它上传资源文件。媒体上传到微信 CDN（发送媒体消息）
+还没有实现，届时请求体用 `ArrayBuffer`：`/api/network/proxy` 原样转发请求体与 Content-Type。
 
 ### 4. 配置模型
 

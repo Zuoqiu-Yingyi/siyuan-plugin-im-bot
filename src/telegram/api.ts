@@ -111,9 +111,9 @@ export class TelegramApi {
         this.siyuan = siyuan;
     }
 
-    /* 机器人自己的信息, 用于验证 Token */
-    public async getMe(options: ITelegramOptions): Promise<IUser> {
-        return this.call(options, "getMe");
+    /* 机器人自己的信息, 用于验证 Token; signal 中止时取消请求 */
+    public async getMe(options: ITelegramOptions, signal?: AbortSignal): Promise<IUser> {
+        return this.call(options, "getMe", {}, signal);
     }
 
     /**
@@ -121,14 +121,15 @@ export class TelegramApi {
      * @param options - Token 与服务器地址
      * @param offset - 第一个要返回的更新的 update_id, 之前的更新随之确认, 服务端不再返回; 省略时返回所有未确认的更新
      * @param timeout - 长轮询的秒数
+     * @param signal - 中止时取消请求
      */
-    public async getUpdates(options: ITelegramOptions, offset: number | undefined, timeout: number): Promise<IUpdate[]> {
+    public async getUpdates(options: ITelegramOptions, offset: number | undefined, timeout: number, signal?: AbortSignal): Promise<IUpdate[]> {
         return this.call(options, "getUpdates", {
             offset,
             limit: POLL_LIMIT,
             timeout,
             allowed_updates: ALLOWED_UPDATES,
-        });
+        }, signal);
     }
 
     /**
@@ -183,15 +184,16 @@ export class TelegramApi {
 
     /**
      * 调用 Bot API 方法, 参数以 JSON 发送
-     * @throws TelegramApiError: 返回的 ok 为 false, 或者响应不是 Bot API 的格式; Error: 内核无法转发或请求超时
+     * @throws TelegramApiError: 返回的 ok 为 false, 或者响应不是 Bot API 的格式; Error: 内核无法转发、请求超时或被 signal 中止
      */
-    private async call<T>(options: ITelegramOptions, method: string, params: Record<string, unknown> = {}): Promise<T> {
+    private async call<T>(options: ITelegramOptions, method: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
         let response: IProxyResponse;
         try {
             response = await proxyFetch(this.siyuan, {
                 url: `${options.apiBaseUrl}/bot${options.token}/${method}`,
                 method: "POST",
                 json: params,
+                signal,
             });
         }
         catch (error) {
