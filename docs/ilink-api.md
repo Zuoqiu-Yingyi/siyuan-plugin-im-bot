@@ -586,7 +586,7 @@ token 裸调同样被服务端拒绝）。`openclaw-weixin` issue #202（2026-06
 
 im-bot 的实现（`src/weixin/media.ts`）：
 
-- 收到媒体消息后先以占位文本写入，回复之后再下载。插件的 `minAppVersion` 是 3.8.7-alpha.6，
+- 收到媒体消息后先以占位文本写入，回复之后再下载。插件的 `minAppVersion` 是 3.8.7，
   直接使用 `crypto.subtle` 的 `AES-ECB` 与 `MD5`，不再检查内核是否支持。
 - 下载经 `/api/network/proxy`（`proxyFetchBinary`），解密后用 `/api/asset/upload` 上传为资源文件，再用
   `/api/block/updateBlock` 替换消息超级块：块 ID 与块属性不变，指向它的块引用仍然有效，子块会换成新的块。
