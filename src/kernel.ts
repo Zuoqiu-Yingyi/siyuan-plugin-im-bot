@@ -59,6 +59,7 @@ import type { IApiResponse, IGroupInfo, IPayload, IQQConnectionState } from "@/t
 import type { ITelegramConnectionState, IUpdate } from "@/types/telegram";
 import type { IBotUsers } from "@/types/users";
 import type { IWeixinAccount, IWeixinAccountState, IWeixinLoginState, IWeixinMessage } from "@/types/weixin";
+import type { INoticeEnvironment } from "@/utils/notices";
 import type { IConfirmedLogin } from "@/weixin/login";
 
 const CONFIG_RELOAD_DELAY = 1_000; // 配置文件变化后重新读取的延迟 (ms), 合并一次写入产生的多个文件事件
@@ -211,6 +212,8 @@ class ImBotKernelPlugin {
     private weixinReloadTimer?: ReturnType<typeof setTimeout>;
     private device = ""; // 本机设备 ID
     private deviceName = ""; // 本机设备名称, 用于通知
+    private workspace = ""; // 工作空间名称, 用于通知
+    private kernelVersion = ""; // 思源内核版本, 用于通知
     private running?: boolean; // 上次应用配置时本机是否运行 QQ 机器人
     private telegramRunning?: boolean; // 上次应用配置时本机是否运行 Telegram 机器人
     private feishuRunning?: boolean; // 上次应用配置时本机是否运行飞书机器人
@@ -256,9 +259,11 @@ class ImBotKernelPlugin {
     /* 加载 */
     private async onload(): Promise<void> {
         await this.loadConfig();
-        const device = await this.loadDevice();
-        this.device = device.id;
-        this.deviceName = device.name;
+        const system = await this.loadSystem();
+        this.device = system.id;
+        this.deviceName = system.name;
+        this.kernelVersion = system.kernelVersion;
+        this.workspace = await this.loadWorkspace();
 
         /* 绑定 RPC 方法 */
         await this.siyuan.rpc.bind(CONSTANTS.KERNEL_RPC_METHOD.UPDATE_CONFIG, this.rpcUpdateConfig.bind(this), "Update the plugin config, then connect or disconnect the QQ and Feishu bots and start or stop receiving WeChat and Telegram messages as the new config says.");
@@ -369,7 +374,7 @@ class ImBotKernelPlugin {
         if (!options || chats.length === 0) {
             return;
         }
-        await this.feishuNotices.send(options, chats, notice, this.deviceName || this.device);
+        await this.feishuNotices.send(options, chats, notice, this.noticeEnvironment());
     }
 
     /**
@@ -415,7 +420,7 @@ class ImBotKernelPlugin {
         if (!options || chats.length === 0) {
             return;
         }
-        await this.telegramNotices.send(options, chats, notice, this.deviceName || this.device);
+        await this.telegramNotices.send(options, chats, notice, this.noticeEnvironment());
     }
 
     /**
@@ -477,7 +482,18 @@ class ImBotKernelPlugin {
         if (!credentials || groups.length === 0) {
             return;
         }
-        await this.notices.send(credentials, groups, notice, this.deviceName || this.device);
+        await this.notices.send(credentials, groups, notice, this.noticeEnvironment());
+    }
+
+    /* 上线与下线通知中的运行环境 */
+    private noticeEnvironment(): INoticeEnvironment {
+        return {
+            deviceName: this.deviceName,
+            deviceId: this.device,
+            workspace: this.workspace,
+            kernelVersion: this.kernelVersion,
+            pluginVersion: this.siyuan.plugin.version,
+        };
     }
 
     /**
@@ -648,17 +664,34 @@ class ImBotKernelPlugin {
         };
     }
 
-    /* 本机设备的 ID 与名称, ID 与前端的 siyuan.config.system.id 相同 */
-    private async loadDevice(): Promise<{ id: string; name: string }> {
+    /* 本机设备的 ID 与名称以及思源内核版本, ID 与前端的 siyuan.config.system.id 相同 */
+    private async loadSystem(): Promise<{ id: string; name: string; kernelVersion: string }> {
         try {
             const response = await this.siyuan.client.fetch("/api/system/getConf", { method: "POST", body: "{}" });
-            const result = (await response.json()) as { data?: { conf?: { system?: { id?: string; name?: string } } } };
+            const result = (await response.json()) as { data?: { conf?: { system?: { id?: string; name?: string; kernelVersion?: string } } } };
             const system = result.data?.conf?.system;
-            return { id: system?.id ?? "", name: system?.name ?? "" };
+            return { id: system?.id ?? "", name: system?.name ?? "", kernelVersion: system?.kernelVersion ?? "" };
         }
         catch (error) {
-            void this.siyuan.logger.warn("get the device ID failed:", String(error));
-            return { id: "", name: "" };
+            void this.siyuan.logger.warn("get the device ID and the kernel version failed:", String(error));
+            return { id: "", name: "", kernelVersion: "" };
+        }
+    }
+
+    /**
+     * 工作空间名称, 与思源界面上显示的相同, 即工作空间目录的名称。
+     * /api/system/getConf 对 User-Agent 不以 SiYuan/ 开头的请求隐去 workspaceDir, 内核插件的请求也是如此, 所以改用 getWorkspaceInfo
+     */
+    private async loadWorkspace(): Promise<string> {
+        try {
+            const response = await this.siyuan.client.fetch("/api/system/getWorkspaceInfo", { method: "POST", body: "{}" });
+            const result = (await response.json()) as { data?: { workspaceDir?: string } };
+            // Windows 上的路径分隔符是反斜杠
+            return (result.data?.workspaceDir ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
+        }
+        catch (error) {
+            void this.siyuan.logger.warn("get the workspace name failed:", String(error));
+            return "";
         }
     }
 

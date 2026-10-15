@@ -13,17 +13,21 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import { noticeContent } from "@/utils/notices";
+
 import type * as kernel from "siyuan/kernel";
+
+import type { INoticeEnvironment } from "@/utils/notices";
 
 import type { QQOpenApi, TCredentials } from "./openapi";
 
 /* 通知类型: online 为机器人开始运行 (上线), offline 为机器人停止运行 (下线) */
 export type TNotice = "offline" | "online";
 
-/* 通知文本, {{1}} 为设备名称 */
+/* 通知文本, 之后附上运行环境 */
 const DEFAULT_TEXTS: Record<TNotice, string> = {
-    offline: "Inbox offline: messages of this group are not recorded for now (device: {{1}})",
-    online: "Inbox online: messages of this group are recorded in SiYuan (device: {{1}})",
+    offline: "Inbox offline: messages of this group are not recorded for now",
+    online: "Inbox online: messages of this group are recorded in SiYuan",
 };
 
 function errorMessage(error: unknown): string {
@@ -51,10 +55,10 @@ export class QQNotices {
      * @param credentials - 机器人的 AppID 与 AppSecret
      * @param groups - 群的 group_openid, 重复的只发送一次
      * @param notice - 通知类型
-     * @param device - 通知中的设备名称
+     * @param environment - 通知中的设备、工作空间与版本
      */
-    public async send(credentials: TCredentials, groups: string[], notice: TNotice, device: string): Promise<void> {
-        const content = this.text(notice).replaceAll("{{1}}", device);
+    public async send(credentials: TCredentials, groups: string[], notice: TNotice, environment: INoticeEnvironment): Promise<void> {
+        const content = noticeContent(this.siyuan, this.text(notice), environment);
         await Promise.all([...new Set(groups)].map((group) => this.sendTo(credentials, group, notice, content)));
     }
 
