@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.4.1](https://github.com/Zuoqiu-Yingyi/siyuan-plugin-im-bot/compare/v0.4.0...v0.4.1) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* use the standard Web APIs of the kernel plugin sandbox
+
+### Miscellaneous
+
+* release `v0.4.1` ([65125f2](https://github.com/Zuoqiu-Yingyi/siyuan-plugin-im-bot/commit/65125f26285209dc013a1dee64f1f817052d8200))
+* **release:** release v0.4.1 ([5f3e79d](https://github.com/Zuoqiu-Yingyi/siyuan-plugin-im-bot/commit/5f3e79d067ecc78ab2b1dd884e8a96463ee600ae))
+
+
+### Features
+
+* add the device ID, workspace and versions to the inbox notices ([266ead6](https://github.com/Zuoqiu-Yingyi/siyuan-plugin-im-bot/commit/266ead6e07a98e63de6b3dba8ac2718ee6d02b0a))
+
+
+### Code Refactoring
+
+* use the standard Web APIs of the kernel plugin sandbox ([ec6a1b2](https://github.com/Zuoqiu-Yingyi/siyuan-plugin-im-bot/commit/ec6a1b28b846aca704e209a1231e566f31837fe4))
+
 ## [0.4.0](https://github.com/Zuoqiu-Yingyi/siyuan-plugin-im-bot/compare/v0.3.0...v0.4.0) (2026-10-03)
 
 
