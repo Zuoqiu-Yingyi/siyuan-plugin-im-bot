@@ -130,9 +130,9 @@ function endpointUrl(baseUrl: string, endpoint: string): string {
     return `${baseUrl.replace(/\/+$/, "")}/${endpoint}`;
 }
 
-/* 0 到 2^32 - 1 的随机整数; goja 没有 crypto 模块, 这些值只用于请求标识, 不需要密码学安全 */
+/* 0 到 2^32 - 1 的随机整数 */
 function randomUint32(): number {
-    return Math.floor(Math.random() * 0x1_0000_0000);
+    return crypto.getRandomValues(new Uint32Array(1))[0]!;
 }
 
 /* X-WECHAT-UIN: 随机 uint32 的十进制字符串再做 base64, 每个请求都重新生成 */
@@ -164,8 +164,9 @@ export class WeixinApi {
      * @param baseUrl - 接口地址, 收到 scaned_but_redirect 后改用 redirect_host
      * @param qrcode - 二维码 ID; 扫码确认后用它可以取得 bot_token, 所以不写入错误信息
      * @param verifyCode - 用户输入的手机上显示的数字
+     * @param signal - 中止时取消查询
      */
-    public async getQRCodeStatus(baseUrl: string, qrcode: string, verifyCode?: string): Promise<IQRCodeStatusResponse> {
+    public async getQRCodeStatus(baseUrl: string, qrcode: string, verifyCode?: string, signal?: AbortSignal): Promise<IQRCodeStatusResponse> {
         let endpoint = `ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`;
         if (verifyCode) {
             endpoint += `&verify_code=${encodeURIComponent(verifyCode)}`;
@@ -175,6 +176,7 @@ export class WeixinApi {
                 url: endpointUrl(baseUrl, endpoint),
                 method: "GET",
                 headers: this.commonHeaders(),
+                signal,
             });
             return this.parse("get_qrcode_status", response);
         }
@@ -190,12 +192,13 @@ export class WeixinApi {
      * 长轮询获取新消息, 服务端最多保持约 35 秒
      * @param credentials - 登录信息
      * @param cursor - 上次响应中的 get_updates_buf, 首次请求为空字符串
+     * @param signal - 中止时取消请求
      */
-    public async getUpdates(credentials: TCredentials, cursor: string): Promise<IGetUpdatesResponse> {
+    public async getUpdates(credentials: TCredentials, cursor: string, signal?: AbortSignal): Promise<IGetUpdatesResponse> {
         return this.post("getupdates", credentials.baseUrl, "ilink/bot/getupdates", {
             get_updates_buf: cursor,
             base_info: this.baseInfo(),
-        }, credentials.token);
+        }, credentials.token, signal);
     }
 
     /**
@@ -261,9 +264,10 @@ export class WeixinApi {
      * @param endpoint - 接口路径, 可以带查询参数
      * @param body - 请求体, 以 JSON 发送
      * @param token - bot_token, 获取二维码时没有
-     * @throws 内核拒绝转发、请求超时、HTTP 状态码不是 2xx 或响应体不是 JSON
+     * @param signal - 中止时取消请求
+     * @throws 内核拒绝转发、请求超时或被中止、HTTP 状态码不是 2xx 或响应体不是 JSON
      */
-    private async post<T>(label: string, baseUrl: string, endpoint: string, body: unknown, token?: string): Promise<T> {
+    private async post<T>(label: string, baseUrl: string, endpoint: string, body: unknown, token?: string, signal?: AbortSignal): Promise<T> {
         const headers: Record<string, string[]> = {
             "AuthorizationType": ["ilink_bot_token"],
             "X-WECHAT-UIN": [randomUin()],
@@ -277,6 +281,7 @@ export class WeixinApi {
             method: "POST",
             headers,
             json: body,
+            signal,
         });
         return this.parse<T>(label, response);
     }

@@ -15,9 +15,11 @@
 
 /* 经思源内核转发到外网的请求: 内核插件的 siyuan.client 只能访问本机内核 */
 
+import { kernelFetch } from "./fetch";
+
 import type * as kernel from "siyuan/kernel";
 
-const PROXY_DIAL_TIMEOUT = 10_000; // /api/network/proxy 的 t 参数, 只限制连接目标的时长 (ms); 整个请求受 siyuan.client.fetch 的 1 分钟超时限制
+const PROXY_DIAL_TIMEOUT = 10_000; // /api/network/proxy 的 t 参数, 只限制连接目标的时长 (ms)
 
 /* 经内核转发的 HTTP 请求 */
 export interface IProxyRequest {
@@ -25,6 +27,7 @@ export interface IProxyRequest {
     method: string;
     headers?: Record<string, string[]>; // 转发给目标的请求头
     json?: unknown; // JSON 请求体, undefined 表示没有请求体
+    signal?: AbortSignal; // 中止时取消请求, 以 signal 的 reason 拒绝
 }
 
 /* 目标的响应 */
@@ -65,17 +68,21 @@ export function redactProxyParams(text: string): string {
     return text.replace(/([?&][uh]=)[\w-]+/g, "$1***");
 }
 
-/* 把请求交给内核转发 */
+/**
+ * 把请求交给内核转发。
+ * 内核读完目标的响应体后才返回响应头, 所以 siyuan.client.fetch 的默认超时 (1 分钟) 限制的是整个请求
+ */
 function forward(siyuan: kernel.ISiyuan, request: IProxyRequest): Promise<kernel.IFetchResponse> {
     const headers = request.headers
         ? `&h=${encodeBase64Url(JSON.stringify(request.headers))}`
         : "";
-    return siyuan.client.fetch(`/api/network/proxy?u=${encodeBase64Url(request.url)}&t=${PROXY_DIAL_TIMEOUT}ms${headers}`, request.json === undefined
-        ? { method: request.method }
+    return kernelFetch(siyuan, `/api/network/proxy?u=${encodeBase64Url(request.url)}&t=${PROXY_DIAL_TIMEOUT}ms${headers}`, request.json === undefined
+        ? { method: request.method, signal: request.signal }
         : {
                 method: request.method,
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(request.json),
+                signal: request.signal,
             });
 }
 
@@ -110,7 +117,7 @@ function targetHeaders(request: IProxyRequest, response: kernel.IFetchResponse, 
  * @param siyuan - 内核插件全局对象
  * @param request - 发给目标的请求
  * @returns 目标的响应, 任何状态码都会返回
- * @throws 内核拒绝转发或请求超时 (siyuan.client.fetch 的超时为 1 分钟)
+ * @throws 内核拒绝转发、请求超时 (1 分钟) 或被 request.signal 中止
  */
 export async function proxyFetch(siyuan: kernel.ISiyuan, request: IProxyRequest): Promise<IProxyResponse> {
     const response = await forward(siyuan, request);
@@ -120,11 +127,10 @@ export async function proxyFetch(siyuan: kernel.ISiyuan, request: IProxyRequest)
 
 /**
  * 与 proxyFetch 相同, 但以二进制读取目标的响应体, 用于下载文件
- * @throws 内核拒绝转发或请求超时 (siyuan.client.fetch 的超时为 1 分钟)
+ * @throws 内核拒绝转发、请求超时 (1 分钟) 或被 request.signal 中止
  */
 export async function proxyFetchBinary(siyuan: kernel.ISiyuan, request: IProxyRequest): Promise<IProxyResponse<ArrayBuffer>> {
     const response = await forward(siyuan, request);
     const body = await response.arrayBuffer();
-    // eslint-disable-next-line node/prefer-global/buffer
-    return { status: response.status, headers: targetHeaders(request, response, () => Buffer.from(body).toString("utf8")), body };
+    return { status: response.status, headers: targetHeaders(request, response, () => new TextDecoder().decode(body)), body };
 }

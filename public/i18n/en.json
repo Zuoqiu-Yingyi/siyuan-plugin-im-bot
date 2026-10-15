@@ -98,15 +98,16 @@
         "wakeup": "Wake-up message"
     },
     "notices": {
+        "environment": "Device: {{1}}\nDevice ID: {{2}}\nWorkspace: {{3}}\nSiYuan kernel version: {{4}}\nim-bot version: {{5}}",
         "feishu": {
-            "offline": "Inbox offline: messages of this chat are not recorded for now (device: {{1}})",
-            "online": "Inbox online: messages of this chat are recorded in SiYuan (device: {{1}})"
+            "offline": "Inbox offline: messages of this chat are not recorded for now",
+            "online": "Inbox online: messages of this chat are recorded in SiYuan"
         },
-        "offline": "Inbox offline: messages of this group are not recorded for now (device: {{1}})",
-        "online": "Inbox online: messages of this group are recorded in SiYuan (device: {{1}})",
+        "offline": "Inbox offline: messages of this group are not recorded for now",
+        "online": "Inbox online: messages of this group are recorded in SiYuan",
         "telegram": {
-            "offline": "Inbox offline: messages of this chat are not recorded for now (device: {{1}})",
-            "online": "Inbox online: messages of this chat are recorded in SiYuan (device: {{1}})"
+            "offline": "Inbox offline: messages of this chat are not recorded for now",
+            "online": "Inbox online: messages of this chat are recorded in SiYuan"
         }
     },
     "settings": {
@@ -375,7 +376,7 @@
                 "title": "Inbox document ID"
             },
             "inboxDownloadAssets": {
-                "description": "Download and decrypt the images, voice messages, videos and files of messages into the workspace; they stay placeholders when this version of SiYuan cannot decrypt them",
+                "description": "Download and decrypt the images, voice messages, videos and files of messages into the workspace",
                 "title": "Download assets"
             },
             "inboxEnabled": {

@@ -33,8 +33,6 @@ import {
     decodeFrame,
     encodeFrame,
     frameHeader,
-    utf8Decode,
-    utf8Encode,
 } from "./protobuf";
 
 import type * as kernel from "siyuan/kernel";
@@ -82,6 +80,10 @@ interface ISessionResult {
     healthy: boolean;
     reason: string;
 }
+
+/* 事件、回包与 pong 的 payload 都是 UTF-8 编码的 JSON */
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -396,7 +398,7 @@ export class FeishuGateway {
         const started = Date.now();
         let data: IEvent;
         try {
-            data = JSON.parse(utf8Decode(payload)) as IEvent;
+            data = JSON.parse(decoder.decode(payload)) as IEvent;
         }
         catch (error) {
             // 不回包: 服务端稍后会重推
@@ -407,7 +409,7 @@ export class FeishuGateway {
         void this.send(connection, {
             ...frame,
             headers: [...frame.headers, { key: FrameHeader.BIZ_RT, value: String(Date.now() - started) }],
-            payload: utf8Encode(JSON.stringify({ code: 200 })),
+            payload: encoder.encode(JSON.stringify({ code: 200 })),
         });
         this.dispatch(bot, data);
     }
@@ -418,7 +420,7 @@ export class FeishuGateway {
             return;
         }
         try {
-            const config = JSON.parse(utf8Decode(frame.payload)) as IClientConfig;
+            const config = JSON.parse(decoder.decode(frame.payload)) as IClientConfig;
             const interval = milliseconds(config.PingInterval);
             if (interval && interval !== connection.pingInterval) {
                 // 读超时按新的间隔计算, 已经安排的下一次心跳也要按新的间隔重新安排

@@ -241,8 +241,7 @@ export class FeishuApi {
             if (ok && (!contentType.includes("json") || response.body.byteLength > ERROR_BODY_MAX_BYTES)) {
                 return { data: response.body, contentType };
             }
-            // eslint-disable-next-line node/prefer-global/buffer
-            const text = Buffer.from(response.body).toString("utf8");
+            const text = new TextDecoder().decode(response.body);
             const body = parseJson<IResponse<unknown>>(text);
             const code = typeof body?.code === "number" ? body.code : undefined;
             if (ok && !code) {

@@ -13,16 +13,19 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import { noticeContent } from "@/utils/notices";
+
 import type * as kernel from "siyuan/kernel";
 
 import type { TNotice } from "@/qq/notices";
+import type { INoticeEnvironment } from "@/utils/notices";
 
 import type { FeishuApi, IFeishuOptions } from "./api";
 
-/* 通知文本, {{1}} 为设备名称 */
+/* 通知文本, 之后附上运行环境 */
 const DEFAULT_TEXTS: Record<TNotice, string> = {
-    offline: "Inbox offline: messages of this chat are not recorded for now (device: {{1}})",
-    online: "Inbox online: messages of this chat are recorded in SiYuan (device: {{1}})",
+    offline: "Inbox offline: messages of this chat are not recorded for now",
+    online: "Inbox online: messages of this chat are recorded in SiYuan",
 };
 
 function errorMessage(error: unknown): string {
@@ -48,10 +51,10 @@ export class FeishuNotices {
      * @param options - 凭证与开放平台地址
      * @param chats - 会话 ID, 重复的只发送一次
      * @param notice - 通知类型
-     * @param device - 通知中的设备名称
+     * @param environment - 通知中的设备、工作空间与版本
      */
-    public async send(options: IFeishuOptions, chats: string[], notice: TNotice, device: string): Promise<void> {
-        const text = this.text(notice).replaceAll("{{1}}", () => device);
+    public async send(options: IFeishuOptions, chats: string[], notice: TNotice, environment: INoticeEnvironment): Promise<void> {
+        const text = noticeContent(this.siyuan, this.text(notice), environment);
         await Promise.all([...new Set(chats)].map((chat) => this.sendTo(options, chat, notice, text)));
     }
 

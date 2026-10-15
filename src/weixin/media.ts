@@ -23,16 +23,6 @@ import type * as kernel from "siyuan/kernel";
 
 import type { ICDNMedia, IMessageItem, IWeixinMessage } from "@/types/weixin";
 
-/**
- * 用到的 siyuan.crypto.subtle 方法。较新的内核才提供 siyuan.crypto (siyuan-note/siyuan#20042),
- * AES-ECB 与 MD5 是内核在 Web Crypto 之外提供的扩展; 已发布的 siyuan 类型声明中还没有 siyuan.crypto
- */
-interface ISubtleCrypto {
-    importKey: (format: "raw", keyData: ArrayBuffer | ArrayBufferView, algorithm: { name: string }, extractable: boolean, keyUsages: string[]) => Promise<unknown>;
-    decrypt: (algorithm: { name: string }, key: unknown, data: ArrayBuffer | ArrayBufferView) => Promise<ArrayBuffer>;
-    digest: (algorithm: string, data: ArrayBuffer | ArrayBufferView) => Promise<ArrayBuffer>;
-}
-
 type TMediaKind = "file" | "image" | "video" | "voice";
 
 /* 媒体消息项的类型 */
@@ -47,7 +37,7 @@ const MEDIA_KINDS: Partial<Record<number, TMediaKind>> = {
 interface IMediaSource {
     kind: TMediaKind;
     media: ICDNMedia;
-    key?: Uint8Array; // AES-128 密钥, 没有密钥的图片按明文下载
+    key?: Uint8Array<ArrayBuffer>; // AES-128 密钥, 没有密钥的图片按明文下载
     name: string; // 资源文件名, 图片、语音与视频按文件头补上扩展名
     size?: number; // 消息声明的大小 (字节), 用于下载前检查
     md5?: string; // 消息声明的明文 MD5
@@ -100,7 +90,7 @@ function hex(data: ArrayBuffer): string {
  * image_item.aeskey 是 hex 字符串; media.aes_key 是 base64, 解出 16 字节原始密钥或 32 个字符的 hex 字符串
  * @throws 密钥的格式不正确
  */
-function parseKey(keyHex: string | undefined, keyBase64: string | undefined): Uint8Array | undefined {
+function parseKey(keyHex: string | undefined, keyBase64: string | undefined): Uint8Array<ArrayBuffer> | undefined {
     if (keyHex) {
         if (!AES_KEY_HEX.test(keyHex)) {
             throw new Error(`aeskey is not a 32-character hex string`);
@@ -200,16 +190,14 @@ function extension(kind: Exclude<TMediaKind, "file">, data: ArrayBuffer): string
 }
 
 /**
- * 微信消息中的媒体: 从 CDN 下载, 用 siyuan.crypto 的 AES-128-ECB 解密, 再保存为思源资源文件。
- * 内核没有 siyuan.crypto 或不支持 AES-ECB 时不下载, 媒体保持占位文本。
+ * 微信消息中的媒体: 从 CDN 下载, 用 crypto.subtle 的 AES-128-ECB 解密, 再保存为思源资源文件。
+ * AES-ECB 与 MD5 是思源内核在 Web Crypto 之外提供的扩展, 浏览器中没有。
  * Downloads the media of WeChat messages from the CDN, decrypts them with the
- * AES-128-ECB of siyuan.crypto and saves them as SiYuan assets. Without
- * siyuan.crypto or its AES-ECB the media stay placeholders.
+ * AES-128-ECB of crypto.subtle, an extension of the SiYuan kernel beyond Web
+ * Crypto, and saves them as SiYuan assets.
  */
 export class WeixinMedia {
     private readonly siyuan: kernel.ISiyuan;
-
-    private support?: Promise<ISubtleCrypto | undefined>; // 内核是否支持 AES-ECB, 只检查一次
 
     /**
      * @param siyuan - 内核插件全局对象
@@ -229,40 +217,15 @@ export class WeixinMedia {
         if (!items.some((item) => MEDIA_KINDS[item.type ?? 0])) {
             return [];
         }
-        this.support ??= this.probe();
-        const subtle = await this.support;
-        if (!subtle) {
-            return [];
-        }
 
         const assets: (string | undefined)[] = [];
         for (const item of items) {
-            assets.push(await this.saveItem(subtle, message, item, block));
+            assets.push(await this.saveItem(message, item, block));
         }
         return assets.some(Boolean) ? assets : [];
     }
 
-    /**
-     * 内核提供 siyuan.crypto 且支持 AES-ECB 时为 siyuan.crypto.subtle。
-     * AES-ECB 不属于 Web Crypto, 提供 siyuan.crypto 的内核不一定支持它, 所以用一个全零密钥试着导入
-     */
-    private async probe(): Promise<ISubtleCrypto | undefined> {
-        const subtle = (this.siyuan as kernel.ISiyuan & { crypto?: { subtle?: ISubtleCrypto } }).crypto?.subtle;
-        if (!subtle) {
-            void this.siyuan.logger.info("[weixin] [media] siyuan.crypto is not available in this version of SiYuan, keep the media of messages as placeholders");
-            return undefined;
-        }
-        try {
-            await subtle.importKey("raw", new Uint8Array(16), { name: "AES-ECB" }, false, ["decrypt"]);
-            return subtle;
-        }
-        catch (error) {
-            void this.siyuan.logger.info("[weixin] [media] siyuan.crypto of this version of SiYuan does not support AES-ECB, keep the media of messages as placeholders:", errorMessage(error));
-            return undefined;
-        }
-    }
-
-    private async saveItem(subtle: ISubtleCrypto, message: IWeixinMessage, item: IMessageItem, block: string): Promise<string | undefined> {
+    private async saveItem(message: IWeixinMessage, item: IMessageItem, block: string): Promise<string | undefined> {
         const kind = MEDIA_KINDS[item.type ?? 0];
         if (!kind) {
             return undefined;
@@ -287,9 +250,9 @@ export class WeixinMedia {
                 throw new Error(`downloaded ${response.body.byteLength} bytes, more than ${MEDIA_MAX_BYTES}`);
             }
             const data = source.key
-                ? await this.decrypt(subtle, source.key, response.body)
+                ? await this.decrypt(source.key, response.body)
                 : response.body;
-            await this.verify(subtle, data, source.md5, label);
+            await this.verify(data, source.md5, label);
 
             const name = source.kind === "file"
                 ? source.name
@@ -305,24 +268,17 @@ export class WeixinMedia {
     }
 
     /* AES-128-ECB 解密, 内核会校验并去掉 PKCS#7 填充 */
-    private async decrypt(subtle: ISubtleCrypto, key: Uint8Array, data: ArrayBuffer): Promise<ArrayBuffer> {
-        const cryptoKey = await subtle.importKey("raw", key, { name: "AES-ECB" }, false, ["decrypt"]);
-        return subtle.decrypt({ name: "AES-ECB" }, cryptoKey, data);
+    private async decrypt(key: Uint8Array<ArrayBuffer>, data: ArrayBuffer): Promise<ArrayBuffer> {
+        const cryptoKey = await crypto.subtle.importKey("raw", key, { name: "AES-ECB" }, false, ["decrypt"]);
+        return crypto.subtle.decrypt({ name: "AES-ECB" }, cryptoKey, data);
     }
 
     /* 校验消息声明的 MD5; 只记录日志, 不丢弃文件: 还没有确认该值总是明文的 MD5 */
-    private async verify(subtle: ISubtleCrypto, data: ArrayBuffer, md5: string | undefined, label: string): Promise<void> {
+    private async verify(data: ArrayBuffer, md5: string | undefined, label: string): Promise<void> {
         if (!md5) {
             return;
         }
-        let actual: string;
-        try {
-            actual = hex(await subtle.digest("MD5", data));
-        }
-        catch (error) {
-            void this.siyuan.logger.debug(`[weixin] [media] skip checking the MD5 of ${label}:`, errorMessage(error));
-            return;
-        }
+        const actual = hex(await crypto.subtle.digest("MD5", data));
         if (actual !== md5.trim().toLowerCase()) {
             void this.siyuan.logger.warn(`[weixin] [media] the MD5 of ${label} is ${actual}, but the message says ${md5}`);
         }
